@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import NetWeightRecord, QuarantineRecord, QuarantineStatus
+from app.stats import apply_net_record_to_stats
 from app.validation import InvalidWeighEvent, ValidWeighEvent, parse_and_validate
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,9 @@ def process_consumed_message(
                 from_correction=False,
             )
             session.add(record)
+            session.flush()  # 取得明细 id 后在同事务内抢统计标记
+            # 与明细同一事务：补建/另一实例即使同时看到该行，也只有一方能抢到标记
+            apply_net_record_to_stats(session, record)
             session.commit()
             return ConsumptionOutcome(
                 action="NET_RECORD", record_id=record.id, detail="净重明细已入仓"
@@ -131,16 +135,24 @@ def process_consumed_message(
             detail=f"已隔离：{result.reason_code} {result.reason_detail}",
         )
     except IntegrityError:
-        # 并发/重平衡边缘场景下唯一约束兜底：回滚并按重复处理，位点仍可安全推进
+        # 并发/重平衡边缘场景下唯一约束兜底：回滚并按重复处理，位点仍可安全推进。
+        # 但必须先确认该位点确实已有持久化记录；若没有，说明冲突来自其他约束
+        # （例如统计聚合写入），此时绝不能吞掉消息，必须向上抛出交由消费者重试。
         session.rollback()
         existing = _position_exists(session, topic, partition, offset)
+        if existing is None:
+            logger.exception(
+                "非源位点唯一约束的 IntegrityError at %s-%s:%s，交由消费者重试",
+                topic, partition, offset,
+            )
+            raise
         logger.warning(
             "unique-constraint guard at %s-%s:%s -> duplicate skip",
             topic, partition, offset,
         )
         return ConsumptionOutcome(
             action="DUPLICATE_SKIP",
-            record_id=existing.id if existing else None,
+            record_id=existing.id,
             detail="唯一约束兜底：该源位点已被其他实例处理，跳过",
         )
 
@@ -199,6 +211,9 @@ def apply_correction(
         q.correction_attempts += 1
         q.last_correction_error = None
         q.corrected_at = datetime.now(timezone.utc)
+
+        # 补正成功入仓与统计更新同事务：补正失败则明细与计数一起回滚
+        apply_net_record_to_stats(session, net)
         session.commit()
         logger.info(
             "correction accepted for quarantine %s -> net record %s",

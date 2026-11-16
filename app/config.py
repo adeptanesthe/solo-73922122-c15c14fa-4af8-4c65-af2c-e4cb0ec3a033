@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     # 消费线程在进程内单实例
     log_level: str = Field(default="INFO")
 
+    # ---- 同箱复称统计补建 ----
+    # 每个实例一个后台补建线程；多实例并行安全，逐个实例退出可被其他实例接续
+    stats_backfill_enabled: bool = Field(default=True)
+    stats_backfill_batch_size: int = Field(default=200, ge=1, le=5000)
+    # 一批处理完立即继续下一批；仅在没有待计入行时短暂休眠
+    stats_backfill_idle_seconds: float = Field(default=0.2, ge=0.0)
+    # READY 之后的低频巡检间隔：接续任何遗留的未计入行
+    stats_sweep_seconds: float = Field(default=5.0, ge=0.5)
+    # 单个补建事务的锁等待上限（仅 PostgreSQL，SET LOCAL），超时回滚重试
+    stats_lock_timeout_ms: int = Field(default=5000, ge=100)
+
 
 @lru_cache
 def get_settings() -> Settings:

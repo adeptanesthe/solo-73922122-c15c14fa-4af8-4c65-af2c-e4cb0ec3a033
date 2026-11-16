@@ -17,6 +17,12 @@ x-app-common: &app-common
     CONSUMER_GROUP: weighbridge-consumer-group
     CONSUMER_ENABLED: "true"
     LOG_LEVEL: INFO
+    # 同箱复称统计：在线补建（多实例并行安全）
+    STATS_BACKFILL_ENABLED: "true"
+    STATS_BACKFILL_BATCH_SIZE: "200"
+    STATS_BACKFILL_IDLE_SECONDS: "0.2"
+    STATS_SWEEP_SECONDS: "5"
+    STATS_LOCK_TIMEOUT_MS: "5000"
   depends_on:
     postgres:
       condition: service_healthy

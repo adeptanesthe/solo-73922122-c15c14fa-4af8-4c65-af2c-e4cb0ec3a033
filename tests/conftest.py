@@ -75,6 +75,12 @@ def db_session(db_setup):
 
 
 @pytest.fixture()
+def db_session_factory(db_setup):
+    """同一测试库的新会话工厂，供后台 worker/独立连接使用。"""
+    return db_setup
+
+
+@pytest.fixture()
 def memory_broker():
     from app.config import get_settings
     from app.messaging import InMemoryBroker, set_broker

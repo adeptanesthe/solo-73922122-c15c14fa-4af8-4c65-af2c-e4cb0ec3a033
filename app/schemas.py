@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -97,3 +98,52 @@ class HealthOut(BaseModel):
     instance_id: str
     consumer_enabled: bool
     assigned_partitions: list[int] = Field(default_factory=list)
+    # 同箱统计补建状态，便于编排层/运维观察
+    inspection_status: Literal["PREPARING", "READY"] = "PREPARING"
+
+
+class SourcePositionOut(BaseModel):
+    """一处地磅来源位置（Kafka 位点），用于回查原始称量消息。"""
+
+    topic: str
+    partition: int
+    offset: int
+
+
+class ContainerInspectionOut(BaseModel):
+    """单箱复称巡检结果。
+
+    ``inspection_status`` 为 PREPARING 时其余字段为空：存量补建尚未完成，
+    不对外暴露半成品统计。READY 后返回称量次数、最小/最大净重及
+    各一处源位置，``weight_range`` = max - min。
+    """
+
+    inspection_status: Literal["PREPARING", "READY"]
+    container_no: str
+    weighing_count: int | None = None
+    min_net_weight: int | None = None
+    max_net_weight: int | None = None
+    weight_range: int | None = None
+    min_source: SourcePositionOut | None = None
+    max_source: SourcePositionOut | None = None
+    updated_at: datetime | None = None
+
+
+class ContainerInspectionPage(BaseModel):
+    """复称箱巡检列表：按最小极差升序（差异最小的箱排在最前）。"""
+
+    inspection_status: Literal["PREPARING", "READY"]
+    total: int
+    limit: int
+    offset: int
+    items: list[ContainerInspectionOut] = Field(default_factory=list)
+
+
+class InspectionStatusOut(BaseModel):
+    """统计补建进度。READY 前巡检接口只报准备中。"""
+
+    inspection_status: Literal["PREPARING", "READY"]
+    ready: bool
+    containers: int
+    started_at: datetime | None = None
+    ready_at: datetime | None = None
